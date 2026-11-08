@@ -1,0 +1,9 @@
+{
+    "id": "ai-spaced-repetition",
+    "name": "AI Spaced Repetition",
+    "version": "0.0.1",
+    "minAppVersion": "1.5.0",
+    "description": "AI-powered flashcard evaluation and learning assistant.",
+    "author": "Ahmed Mahfouz",
+    "isDesktopOnly": true
+}

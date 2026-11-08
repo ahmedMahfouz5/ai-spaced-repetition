@@ -1,0 +1,159 @@
+/* AI Spaced Repetition Plugin Styles */
+
+.ai-spaced-repetition-modal {
+    padding: var(--size-4-2);
+    max-width: 600px;
+}
+
+/* Section Containers */
+.flashcard-question-section,
+.flashcard-user-answer-section {
+    margin-bottom: var(--size-4-4);
+}
+
+/* Section Titles */
+.flashcard-section-title {
+    color: var(--text-normal);
+    font-size: var(--h2-size);
+    font-weight: var(--font-bold);
+    margin-bottom: var(--size-4-2);
+    border-bottom: 2px solid var(--background-modifier-border);
+    padding-bottom: var(--size-4-1);
+}
+
+.flashcard-section-subtitle {
+    color: var(--text-muted);
+    font-size: var(--h3-size);
+    font-weight: var(--font-semibold);
+    margin-bottom: var(--size-4-2);
+}
+
+/* Question Text */
+.flashcard-question-text {
+    color: var(--text-normal);
+    font-size: var(--font-ui-medium);
+    line-height: var(--line-height-tight);
+    background-color: var(--background-primary-alt);
+    padding: var(--size-4-4);
+    border-radius: var(--radius-m);
+    border-left: 4px solid var(--interactive-accent);
+    margin: 0;
+}
+
+/* Textarea for User Answer */
+.flashcard-textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: var(--size-4-2);
+    font-size: var(--font-ui-small);
+    font-family: var(--font-interface);
+    color: var(--text-normal);
+    background-color: var(--background-modifier-form-field);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: var(--radius-s);
+    resize: vertical;
+    transition: border-color 0.15s ease-in-out;
+}
+
+.flashcard-textarea:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 2px var(--interactive-accent-hover);
+}
+
+.flashcard-textarea::placeholder {
+    color: var(--text-faint);
+}
+
+/* Expected Answer Container */
+.flashcard-expected-answer-content {
+    animation: fadeIn 0.2s ease-in-out;
+    margin-bottom: var(--size-4-4);
+}
+
+.flashcard-expected-answer-text {
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    line-height: var(--line-height-normal);
+    background-color: var(--background-secondary);
+    padding: var(--size-4-3);
+    border-radius: var(--radius-m);
+    border: 1px solid var(--background-modifier-border);
+}
+
+/* Validation Message */
+.flashcard-validation-message {
+    color: var(--text-error);
+    font-size: var(--font-ui-smaller);
+    margin-top: var(--size-4-1);
+    padding: var(--size-4-1) 0;
+}
+
+/* Button Section */
+.flashcard-button-section {
+    display: flex;
+    gap: var(--size-4-2);
+    margin-top: var(--size-4-4);
+    padding-top: var(--size-4-2);
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+/* Button Styling */
+.flashcard-button-section button {
+    padding: var(--size-4-2) var(--size-4-3);
+    font-size: var(--font-ui-small);
+    font-weight: var(--font-medium);
+    cursor: pointer;
+    transition: background-color 0.15s ease-in-out;
+}
+
+.flashcard-reveal-button {
+    background-color: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.flashcard-reveal-button:hover {
+    background-color: var(--interactive-accent-hover);
+}
+
+.flashcard-evaluate-button {
+    background-color: var(--interactive-success);
+    color: var(--text-on-accent);
+}
+
+.flashcard-evaluate-button:hover {
+    filter: brightness(1.1);
+}
+
+.flashcard-close-button {
+    background-color: var(--background-modifier-form-field);
+    color: var(--text-normal);
+    border: 1px solid var(--background-modifier-border);
+}
+
+.flashcard-close-button:hover {
+    background-color: var(--background-modifier-hover);
+}
+
+/* Animation for reveal */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 500px) {
+    .flashcard-button-section {
+        flex-direction: column;
+    }
+    
+    .flashcard-button-section button {
+        width: 100%;
+    }
+}
