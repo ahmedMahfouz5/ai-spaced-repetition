@@ -94,3 +94,6 @@ The AI receives a detailed system prompt instructing it to:
 
 #### Input Format
 
+
+## Project Structure
+

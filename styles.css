@@ -344,6 +344,123 @@
   cursor: not-allowed;
 }
 
+/* ════════════════════════════════════════════
+   Voice Answer Section
+   ════════════════════════════════════════════ */
+
+.flashcard-voice-answer-section {
+  margin-bottom: var(--size-4-4);
+}
+
+/* Recording indicator */
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  margin-bottom: var(--size-4-2);
+  padding: var(--size-4-2);
+  background-color: var(--background-modifier-error);
+  color: var(--text-on-accent);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-small);
+  font-weight: var(--font-semibold);
+}
+
+.recording-dot {
+  width: 10px;
+  height: 10px;
+  background-color: #fff;
+  border-radius: 50%;
+  animation: pulse-dot 1.2s infinite ease-in-out;
+}
+
+@keyframes pulse-dot {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.3);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Controls */
+.recording-controls,
+.playback-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.playback-buttons {
+  display: flex;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-2);
+}
+
+/* Voice buttons */
+.voice-record-start-btn {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.voice-record-start-btn:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.voice-record-stop-btn {
+  background-color: var(--text-error);
+  color: var(--text-on-accent);
+}
+
+.voice-record-stop-btn:hover {
+  filter: brightness(1.1);
+}
+
+.voice-record-again-btn {
+  background-color: var(--background-modifier-form-field);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.voice-record-again-btn:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.voice-delete-btn {
+  background-color: var(--background-modifier-form-field);
+  color: var(--text-error);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.voice-delete-btn:hover {
+  background-color: var(--background-modifier-hover);
+  color: var(--text-error);
+}
+
+.voice-submit-btn {
+  background-color: var(--interactive-success);
+  color: var(--text-on-accent);
+}
+
+.voice-submit-btn:hover {
+  filter: brightness(1.1);
+}
+
+/* Audio player */
+.voice-audio-player {
+  width: 100%;
+  max-width: 100%;
+  margin-bottom: var(--size-4-2);
+  border-radius: var(--radius-s);
+}
+
 /* Responsive adjustments */
 @media (max-width: 500px) {
   .flashcard-button-section {
@@ -363,5 +480,16 @@
   .evaluation-score {
     font-size: 2em;
     min-width: auto;
+  }
+
+  .recording-controls,
+  .playback-buttons {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .recording-controls button,
+  .playback-buttons button {
+    width: 100%;
   }
 }
