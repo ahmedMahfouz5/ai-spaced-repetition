@@ -2,6 +2,7 @@ const obsidian = require("obsidian");
 const { AIService } = require("./ai-service");
 const { AudioRecorder } = require("./audio-recorder");
 const { EvaluationRenderer } = require("./evaluation-renderer");
+const { TranscriptionService } = require("./services/TranscriptionService");
 const { formatDuration, formatBytes, compileSessionReport } = require("./utilities");
 
 /**
@@ -14,6 +15,7 @@ class FlashcardReviewModal extends obsidian.Modal {
         this.settings = settings;
         this.aiService = new AIService(settings);
         this.audioRecorder = new AudioRecorder();
+        this.transcriptionService = new TranscriptionService(settings);
         this.evaluationRenderer = null;
 
         // Hardcoded test flashcard
@@ -25,6 +27,8 @@ class FlashcardReviewModal extends obsidian.Modal {
         this.userAnswer = "";
         this.isEvaluating = false;
         this.evaluationResult = null;
+        this.isTranscribing = false;
+        this.transcribedText = "";
 
         // DOM refs
         this._dom = {};
@@ -84,6 +88,34 @@ class FlashcardReviewModal extends obsidian.Modal {
     renderVoiceAnswerSection(container) {
         const sec = container.createEl("div", { cls: "flashcard-voice-answer-section" });
         sec.createEl("h3", { text: "Voice Answer", cls: "flashcard-section-subtitle" });
+
+        // Transcription editor container (hidden until transcription completes)
+        this._dom.transcriptionContainer = sec.createEl("div", { cls: "transcription-container" });
+        this._dom.transcriptionContainer.style.display = "none";
+        this._dom.transcriptionContainer.createEl("h4", {
+            text: "Transcription",
+            cls: "transcription-title"
+        });
+        this._dom.transcriptionTextarea = this._dom.transcriptionContainer.createEl("textarea", {
+            cls: "flashcard-textarea transcription-textarea"
+        });
+        this._dom.transcriptionTextarea.setAttribute("rows", "6");
+        this._dom.transcriptionTextarea.setAttribute("placeholder", "Transcribed text will appear here...");
+        this._dom.transcriptionTextarea.addEventListener("input", (event) => {
+            this.transcribedText = event.target.value;
+        });
+
+        const evaluateBtn = this._dom.transcriptionContainer.createEl("button", {
+            text: "Evaluate Transcript",
+            cls: "mod-cta evaluate-transcript-btn"
+        });
+        evaluateBtn.addEventListener("click", () => this.handleEvaluateTranscript());
+
+        // Transcription status indicator
+        this._dom.transcriptionIndicator = sec.createEl("div", { cls: "transcription-indicator" });
+        this._dom.transcriptionIndicator.style.display = "none";
+        this._dom.transcriptionIndicator.createEl("span", { cls: "transcription-spinner" });
+        this._dom.transcriptionIndicator.createEl("span", { text: " Transcribing...", cls: "transcription-label" });
 
         // Recording indicator
         this._dom.recordingIndicator = sec.createEl("div", { cls: "recording-indicator" });
@@ -309,6 +341,7 @@ class FlashcardReviewModal extends obsidian.Modal {
         this._dom.audioPlayer.src = "";
         this.setVoiceUIState("idle");
         this.showAudioValidation("");
+        this.hideTranscription();
     }
 
     handleRecordAgain() {
@@ -316,18 +349,96 @@ class FlashcardReviewModal extends obsidian.Modal {
         this.handleStartRecording();
     }
 
-    handleSubmitRecording() {
+    async handleSubmitRecording() {
         const recorder = this.audioRecorder;
         if (!recorder.audioBlob || recorder.audioBlob.size === 0) {
             this.showAudioValidation("No valid recording to submit. Please record first.");
             return;
         }
-        new obsidian.Notice(
-            `Recording submitted!\n` +
-            `Duration: ${formatDuration(recorder.recordingDurationMs)}\n` +
-            `Size: ${formatBytes(recorder.audioBlob.size)}\n` +
-            `Audio analysis will be implemented in a future milestone.`
-        );
+
+        if (!this.settings.apiKey) {
+            new obsidian.Notice("API key not configured. Go to Settings → AI Spaced Repetition to add your key.");
+            return;
+        }
+
+        if (this.isTranscribing) return;
+        this.isTranscribing = true;
+        this.showAudioValidation("");
+        this.setTranscriptionState("loading");
+
+        try {
+            const mimeType = recorder.audioBlob.type || "audio/webm";
+            const transcript = await this.transcriptionService.transcribe(recorder.audioBlob, mimeType);
+
+            this.transcribedText = transcript;
+            this._dom.transcriptionTextarea.value = transcript;
+            this.setTranscriptionState("ready");
+
+            new obsidian.Notice("Transcription complete. Review and edit, then click Evaluate Transcript.");
+        } catch (error) {
+            console.error("Transcription error:", error);
+            this.showAudioValidation(`Transcription failed: ${error.message}`);
+            this.setTranscriptionState("hidden");
+        } finally {
+            this.isTranscribing = false;
+        }
+    }
+
+    async handleEvaluateTranscript() {
+        const transcript = this._dom.transcriptionTextarea.value.trim();
+        this.transcribedText = transcript;
+
+        if (!transcript) {
+            this.showAudioValidation("Please review the transcription before evaluating.");
+            this._dom.transcriptionTextarea.focus();
+            return;
+        }
+
+        if (this.isEvaluating) return;
+        this.isEvaluating = true;
+        this.showAudioValidation("");
+        this.setEvaluateButtonState("loading");
+
+        try {
+            const result = await this.aiService.evaluate(this.question, this.expectedAnswer, transcript);
+            this.evaluationResult = result;
+            this.evaluationRenderer.render(result);
+            this.setEvaluateButtonState("reevaluate");
+        } catch (error) {
+            console.error("AI Evaluation error:", error);
+            this.showAudioValidation(`Evaluation failed: ${error.message}`);
+            this.setEvaluateButtonState(this.evaluationResult ? "reevaluate" : "idle");
+        } finally {
+            this.isEvaluating = false;
+        }
+    }
+
+    hideTranscription() {
+        this.transcribedText = "";
+        if (this._dom.transcriptionContainer) {
+            this._dom.transcriptionContainer.style.display = "none";
+        }
+        if (this._dom.transcriptionTextarea) {
+            this._dom.transcriptionTextarea.value = "";
+        }
+    }
+
+    setTranscriptionState(state) {
+        const container = this._dom.transcriptionContainer;
+        const indicator = this._dom.transcriptionIndicator;
+
+        if (!container || !indicator) return;
+
+        if (state === "loading") {
+            container.style.display = "none";
+            indicator.style.display = "flex";
+        } else if (state === "ready") {
+            indicator.style.display = "none";
+            container.style.display = "block";
+        } else {
+            indicator.style.display = "none";
+            container.style.display = "none";
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -339,7 +450,9 @@ class FlashcardReviewModal extends obsidian.Modal {
             recordingIndicator,
             startRecordBtn,
             stopRecordBtn,
-            playbackControls
+            playbackControls,
+            transcriptionContainer,
+            transcriptionIndicator
         } = this._dom;
 
         if (!recordingIndicator || !startRecordBtn || !stopRecordBtn || !playbackControls) return;
@@ -349,17 +462,21 @@ class FlashcardReviewModal extends obsidian.Modal {
             startRecordBtn.style.display = "none";
             stopRecordBtn.style.display = "inline-block";
             playbackControls.style.display = "none";
+            if (transcriptionContainer) transcriptionContainer.style.display = "none";
+            if (transcriptionIndicator) transcriptionIndicator.style.display = "none";
             this._dom.recordingTimer.textContent = " (00:00)";
         } else if (state === "stopped") {
             recordingIndicator.style.display = "none";
             startRecordBtn.style.display = "inline-block";
             stopRecordBtn.style.display = "none";
             playbackControls.style.display = "none";
+            if (transcriptionIndicator) transcriptionIndicator.style.display = "none";
         } else if (state === "playback") {
             recordingIndicator.style.display = "none";
             startRecordBtn.style.display = "none";
             stopRecordBtn.style.display = "none";
             playbackControls.style.display = "block";
+            if (transcriptionIndicator) transcriptionIndicator.style.display = "none";
         } else {
             // idle
             recordingIndicator.style.display = "none";
@@ -398,3 +515,4 @@ class FlashcardReviewModal extends obsidian.Modal {
 }
 
 module.exports = { FlashcardReviewModal };
+

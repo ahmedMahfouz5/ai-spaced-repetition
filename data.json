@@ -1,5 +1,8 @@
 {
   "apiKey": "sk-90f7440a70e2ef96c73b91eb824edd13",
   "baseURL": "https://backend.sovereigneg.com/v1",
-  "model": "gpt-5-nano"
+  "model": "gpt-5-nano",
+  "transcriptionBaseURL": "https://backend.sovereigneg.com/v1",
+  "transcriptionApiKey": "sk-90f7440a70e2ef96c73b91eb824edd13",
+  "transcriptionModel": "voxtral-small-24b-2507"
 }

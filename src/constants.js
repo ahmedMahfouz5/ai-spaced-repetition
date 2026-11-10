@@ -5,7 +5,10 @@
 const DEFAULT_SETTINGS = {
     apiKey: "",
     baseURL: "https://backend.sovereigneg.com/v1",
-    model: "kimi-k3"
+    model: "kimi-k3",
+    transcriptionBaseURL: "",
+    transcriptionApiKey: "",
+    transcriptionModel: "whisper-1"
 };
 
 const VALID_VERDICTS = ["correct", "partially_correct", "incorrect"];
@@ -16,3 +19,4 @@ module.exports = {
     VALID_VERDICTS,
     VALID_RATINGS
 };
+

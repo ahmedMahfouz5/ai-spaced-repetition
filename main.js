@@ -13,7 +13,10 @@ var require_constants = __commonJS({
     var DEFAULT_SETTINGS2 = {
       apiKey: "",
       baseURL: "https://backend.sovereigneg.com/v1",
-      model: "kimi-k3"
+      model: "kimi-k3",
+      transcriptionBaseURL: "",
+      transcriptionApiKey: "",
+      transcriptionModel: "whisper-1"
     };
     var VALID_VERDICTS = ["correct", "partially_correct", "incorrect"];
     var VALID_RATINGS = ["Again", "Hard", "Good", "Easy"];
@@ -53,6 +56,23 @@ var require_settings_tab = __commonJS({
           this.plugin.settings.model = value.trim();
           await this.plugin.saveSettings();
         }));
+        const transcriptionSection = containerEl.createEl("h3", { text: "Transcription (STT)" });
+        transcriptionSection.style.marginTop = "var(--size-4-4)";
+        new obsidian2.Setting(containerEl).setName("Transcription Base URL").setDesc("Full URL of the OpenAI-compatible audio transcriptions endpoint. Leave empty to use the main Base URL with /audio/transcriptions appended.").addText((text) => text.setPlaceholder("https://api.openai.com/v1/audio/transcriptions").setValue(this.plugin.settings.transcriptionBaseURL).onChange(async (value) => {
+          this.plugin.settings.transcriptionBaseURL = value.trim();
+          await this.plugin.saveSettings();
+        }));
+        new obsidian2.Setting(containerEl).setName("Transcription Model").setDesc("Model name to use for audio transcription (e.g., whisper-1).").addText((text) => text.setPlaceholder("whisper-1").setValue(this.plugin.settings.transcriptionModel).onChange(async (value) => {
+          this.plugin.settings.transcriptionModel = value.trim();
+          await this.plugin.saveSettings();
+        }));
+        new obsidian2.Setting(containerEl).setName("Transcription API Key").setDesc("Optional. API key for the transcription provider. Leave empty to use the main API key.").addText((text) => {
+          text.inputEl.type = "password";
+          text.setPlaceholder("sk-...").setValue(this.plugin.settings.transcriptionApiKey).onChange(async (value) => {
+            this.plugin.settings.transcriptionApiKey = value.trim();
+            await this.plugin.saveSettings();
+          });
+        });
       }
     };
     module2.exports = { AISpacedRepetitionSettingTab: AISpacedRepetitionSettingTab2 };
@@ -580,6 +600,198 @@ var require_evaluation_renderer = __commonJS({
   }
 });
 
+// src/services/TranscriptionService.js
+var require_TranscriptionService = __commonJS({
+  "src/services/TranscriptionService.js"(exports2, module2) {
+    var obsidian2 = require("obsidian");
+    var MAX_TRANSCRIPTION_SIZE_BYTES = 25 * 1024 * 1024;
+    var TRANSCRIPTION_TIMEOUT_MS = 3e4;
+    var MIME_TYPE_TO_EXTENSION = {
+      "audio/webm": "webm",
+      "audio/webm;codecs=opus": "webm",
+      "audio/mp4": "m4a",
+      "audio/ogg": "ogg",
+      "audio/ogg;codecs=opus": "ogg",
+      "audio/mp3": "mp3",
+      "audio/mpeg": "mp3",
+      "audio/wav": "wav"
+    };
+    var TranscriptionService = class {
+      constructor(settings) {
+        this.settings = settings;
+      }
+      /**
+       * Sends an audio Blob to the configured transcription endpoint and returns
+       * the recognized text.
+       *
+       * @param {Blob} audioBlob - The recorded audio data.
+       * @param {string} mimeType - The MIME type of the recorded audio.
+       * @returns {Promise<string>} The transcribed text.
+       */
+      async transcribe(audioBlob, mimeType) {
+        if (!audioBlob || !(audioBlob instanceof Blob) || audioBlob.size === 0) {
+          throw new TranscriptionError("No audio recording available.", "missing_audio");
+        }
+        if (audioBlob.size > MAX_TRANSCRIPTION_SIZE_BYTES) {
+          throw new TranscriptionError(
+            `Recording is too large (${this.formatBytes(audioBlob.size)}). Maximum is 25 MB.`,
+            "oversized"
+          );
+        }
+        const extension = this.getExtensionForMimeType(mimeType);
+        if (!extension) {
+          throw new TranscriptionError(
+            `Unsupported audio format: ${mimeType}.`,
+            "unsupported_format"
+          );
+        }
+        const model = this.settings.transcriptionModel || this.settings.model;
+        const requestBody = await this.buildRequestBody(audioBlob, extension, model);
+        let response;
+        try {
+          response = await this.makeRequest(requestBody);
+        } catch (error) {
+          if (error.name === "AbortError" || /timeout/i.test(error.message)) {
+            throw new TranscriptionError(
+              "Transcription request timed out. Try a shorter recording.",
+              "timeout"
+            );
+          }
+          if (error.status === 401) {
+            throw new TranscriptionError(
+              "Transcription failed: invalid API key. Check your settings.",
+              "authentication"
+            );
+          }
+          throw new TranscriptionError(
+            `Transcription failed: ${error.message || error}`,
+            "network"
+          );
+        }
+        return this.parseResponse(response);
+      }
+      /**
+       * Builds a multipart/form-data body from the audio Blob.
+       *
+       * @param {Blob} audioBlob
+       * @param {string} extension
+       * @param {string} model
+       * @returns {Promise<{body: ArrayBuffer, headers: Object}>}
+       */
+      async buildRequestBody(audioBlob, extension, model) {
+        const boundary = `----FormBoundary${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+        const filename = `recording.${extension}`;
+        const contentType = audioBlob.type || `audio/${extension}`;
+        const preamble = `--${boundary}\r
+Content-Disposition: form-data; name="model"\r
+\r
+${model}\r
+--${boundary}\r
+Content-Disposition: form-data; name="file"; filename="${filename}"\r
+Content-Type: ${contentType}\r
+\r
+`;
+        const postamble = `\r
+--${boundary}--\r
+`;
+        const audioBuffer = await audioBlob.arrayBuffer();
+        const preambleBuffer = new TextEncoder().encode(preamble);
+        const postambleBuffer = new TextEncoder().encode(postamble);
+        const combined = new Uint8Array(
+          preambleBuffer.length + audioBuffer.byteLength + postambleBuffer.length
+        );
+        let offset = 0;
+        combined.set(preambleBuffer, offset);
+        offset += preambleBuffer.length;
+        combined.set(new Uint8Array(audioBuffer), offset);
+        offset += audioBuffer.byteLength;
+        combined.set(postambleBuffer, offset);
+        return {
+          body: combined.buffer,
+          headers: {
+            "Content-Type": `multipart/form-data; boundary=${boundary}`
+          }
+        };
+      }
+      /**
+       * Performs the HTTP POST to the transcription endpoint with a timeout.
+       */
+      async makeRequest(requestBody) {
+        const url = this.settings.transcriptionBaseURL || `${this.settings.baseURL}/audio/transcriptions`;
+        const apiKey = this.settings.transcriptionApiKey || this.settings.apiKey;
+        const headers = {
+          ...requestBody.headers,
+          "Authorization": `Bearer ${apiKey}`
+        };
+        const requestPromise = obsidian2.requestUrl({
+          url,
+          method: "POST",
+          headers,
+          body: requestBody.body
+        });
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error("timeout"));
+          }, TRANSCRIPTION_TIMEOUT_MS);
+        });
+        return await Promise.race([requestPromise, timeoutPromise]);
+      }
+      /**
+       * Parses the transcription endpoint response and returns the text.
+       */
+      parseResponse(response) {
+        if (!response || response.status < 200 || response.status >= 300) {
+          const status = response ? response.status : "unknown";
+          let errorType = "network";
+          let msg = `Transcription failed with HTTP ${status}.`;
+          if (status === 401) {
+            errorType = "authentication";
+            msg = "Transcription failed: invalid API key.";
+          } else if (status === 404) {
+            errorType = "endpoint_not_found";
+            msg = "Transcription endpoint not found (404). Check the configured provider endpoint.";
+          }
+          throw new TranscriptionError(msg, errorType);
+        }
+        const data = response.json;
+        if (!data || typeof data.text !== "string") {
+          throw new TranscriptionError("Invalid transcription response format.", "invalid_response");
+        }
+        const text = data.text.trim();
+        if (text.length === 0) {
+          throw new TranscriptionError("Transcription returned empty text.", "empty_transcript");
+        }
+        return text;
+      }
+      /**
+       * Returns the accepted file extension for a given MIME type.
+       */
+      getExtensionForMimeType(mimeType) {
+        if (!mimeType) return null;
+        return MIME_TYPE_TO_EXTENSION[mimeType.toLowerCase()] || null;
+      }
+      /**
+       * Formats a byte count into a human-readable string.
+       */
+      formatBytes(bytes) {
+        if (bytes === 0) return "0 B";
+        const k = 1024;
+        const sizes = ["B", "KB", "MB"];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+      }
+    };
+    var TranscriptionError = class extends Error {
+      constructor(message, code) {
+        super(message);
+        this.name = "TranscriptionError";
+        this.code = code;
+      }
+    };
+    module2.exports = { TranscriptionService, TranscriptionError, MAX_TRANSCRIPTION_SIZE_BYTES };
+  }
+});
+
 // src/flashcard-modal.js
 var require_flashcard_modal = __commonJS({
   "src/flashcard-modal.js"(exports2, module2) {
@@ -587,6 +799,7 @@ var require_flashcard_modal = __commonJS({
     var { AIService } = require_ai_service();
     var { AudioRecorder } = require_audio_recorder();
     var { EvaluationRenderer } = require_evaluation_renderer();
+    var { TranscriptionService } = require_TranscriptionService();
     var { formatDuration, formatBytes, compileSessionReport } = require_utilities();
     var FlashcardReviewModal2 = class extends obsidian2.Modal {
       constructor(app, settings) {
@@ -594,6 +807,7 @@ var require_flashcard_modal = __commonJS({
         this.settings = settings;
         this.aiService = new AIService(settings);
         this.audioRecorder = new AudioRecorder();
+        this.transcriptionService = new TranscriptionService(settings);
         this.evaluationRenderer = null;
         this.question = "What is the difference between Kubernetes Deployment and StatefulSet?";
         this.expectedAnswer = "A Deployment manages stateless applications using ReplicaSets, while a StatefulSet manages stateful applications and provides stable network identities and persistent storage associations.";
@@ -601,6 +815,8 @@ var require_flashcard_modal = __commonJS({
         this.userAnswer = "";
         this.isEvaluating = false;
         this.evaluationResult = null;
+        this.isTranscribing = false;
+        this.transcribedText = "";
         this._dom = {};
       }
       // ═══════════════════════════════════════════════════════════
@@ -647,6 +863,29 @@ var require_flashcard_modal = __commonJS({
       renderVoiceAnswerSection(container) {
         const sec = container.createEl("div", { cls: "flashcard-voice-answer-section" });
         sec.createEl("h3", { text: "Voice Answer", cls: "flashcard-section-subtitle" });
+        this._dom.transcriptionContainer = sec.createEl("div", { cls: "transcription-container" });
+        this._dom.transcriptionContainer.style.display = "none";
+        this._dom.transcriptionContainer.createEl("h4", {
+          text: "Transcription",
+          cls: "transcription-title"
+        });
+        this._dom.transcriptionTextarea = this._dom.transcriptionContainer.createEl("textarea", {
+          cls: "flashcard-textarea transcription-textarea"
+        });
+        this._dom.transcriptionTextarea.setAttribute("rows", "6");
+        this._dom.transcriptionTextarea.setAttribute("placeholder", "Transcribed text will appear here...");
+        this._dom.transcriptionTextarea.addEventListener("input", (event) => {
+          this.transcribedText = event.target.value;
+        });
+        const evaluateBtn = this._dom.transcriptionContainer.createEl("button", {
+          text: "Evaluate Transcript",
+          cls: "mod-cta evaluate-transcript-btn"
+        });
+        evaluateBtn.addEventListener("click", () => this.handleEvaluateTranscript());
+        this._dom.transcriptionIndicator = sec.createEl("div", { cls: "transcription-indicator" });
+        this._dom.transcriptionIndicator.style.display = "none";
+        this._dom.transcriptionIndicator.createEl("span", { cls: "transcription-spinner" });
+        this._dom.transcriptionIndicator.createEl("span", { text: " Transcribing...", cls: "transcription-label" });
         this._dom.recordingIndicator = sec.createEl("div", { cls: "recording-indicator" });
         this._dom.recordingIndicator.style.display = "none";
         this._dom.recordingIndicator.createEl("span", { cls: "recording-dot" });
@@ -831,23 +1070,89 @@ var require_flashcard_modal = __commonJS({
         this._dom.audioPlayer.src = "";
         this.setVoiceUIState("idle");
         this.showAudioValidation("");
+        this.hideTranscription();
       }
       handleRecordAgain() {
         this.handleDeleteRecording();
         this.handleStartRecording();
       }
-      handleSubmitRecording() {
+      async handleSubmitRecording() {
         const recorder = this.audioRecorder;
         if (!recorder.audioBlob || recorder.audioBlob.size === 0) {
           this.showAudioValidation("No valid recording to submit. Please record first.");
           return;
         }
-        new obsidian2.Notice(
-          `Recording submitted!
-Duration: ${formatDuration(recorder.recordingDurationMs)}
-Size: ${formatBytes(recorder.audioBlob.size)}
-Audio analysis will be implemented in a future milestone.`
-        );
+        if (!this.settings.apiKey) {
+          new obsidian2.Notice("API key not configured. Go to Settings \u2192 AI Spaced Repetition to add your key.");
+          return;
+        }
+        if (this.isTranscribing) return;
+        this.isTranscribing = true;
+        this.showAudioValidation("");
+        this.setTranscriptionState("loading");
+        try {
+          const mimeType = recorder.audioBlob.type || "audio/webm";
+          const transcript = await this.transcriptionService.transcribe(recorder.audioBlob, mimeType);
+          this.transcribedText = transcript;
+          this._dom.transcriptionTextarea.value = transcript;
+          this.setTranscriptionState("ready");
+          new obsidian2.Notice("Transcription complete. Review and edit, then click Evaluate Transcript.");
+        } catch (error) {
+          console.error("Transcription error:", error);
+          this.showAudioValidation(`Transcription failed: ${error.message}`);
+          this.setTranscriptionState("hidden");
+        } finally {
+          this.isTranscribing = false;
+        }
+      }
+      async handleEvaluateTranscript() {
+        const transcript = this._dom.transcriptionTextarea.value.trim();
+        this.transcribedText = transcript;
+        if (!transcript) {
+          this.showAudioValidation("Please review the transcription before evaluating.");
+          this._dom.transcriptionTextarea.focus();
+          return;
+        }
+        if (this.isEvaluating) return;
+        this.isEvaluating = true;
+        this.showAudioValidation("");
+        this.setEvaluateButtonState("loading");
+        try {
+          const result = await this.aiService.evaluate(this.question, this.expectedAnswer, transcript);
+          this.evaluationResult = result;
+          this.evaluationRenderer.render(result);
+          this.setEvaluateButtonState("reevaluate");
+        } catch (error) {
+          console.error("AI Evaluation error:", error);
+          this.showAudioValidation(`Evaluation failed: ${error.message}`);
+          this.setEvaluateButtonState(this.evaluationResult ? "reevaluate" : "idle");
+        } finally {
+          this.isEvaluating = false;
+        }
+      }
+      hideTranscription() {
+        this.transcribedText = "";
+        if (this._dom.transcriptionContainer) {
+          this._dom.transcriptionContainer.style.display = "none";
+        }
+        if (this._dom.transcriptionTextarea) {
+          this._dom.transcriptionTextarea.value = "";
+        }
+      }
+      setTranscriptionState(state) {
+        const container = this._dom.transcriptionContainer;
+        const indicator = this._dom.transcriptionIndicator;
+        if (!container || !indicator) return;
+        if (state === "loading") {
+          container.style.display = "none";
+          indicator.style.display = "flex";
+        } else if (state === "ready") {
+          indicator.style.display = "none";
+          container.style.display = "block";
+        } else {
+          indicator.style.display = "none";
+          container.style.display = "none";
+        }
       }
       // ═══════════════════════════════════════════════════════════
       // Voice UI state machine
@@ -857,7 +1162,9 @@ Audio analysis will be implemented in a future milestone.`
           recordingIndicator,
           startRecordBtn,
           stopRecordBtn,
-          playbackControls
+          playbackControls,
+          transcriptionContainer,
+          transcriptionIndicator
         } = this._dom;
         if (!recordingIndicator || !startRecordBtn || !stopRecordBtn || !playbackControls) return;
         if (state === "recording") {
@@ -865,17 +1172,21 @@ Audio analysis will be implemented in a future milestone.`
           startRecordBtn.style.display = "none";
           stopRecordBtn.style.display = "inline-block";
           playbackControls.style.display = "none";
+          if (transcriptionContainer) transcriptionContainer.style.display = "none";
+          if (transcriptionIndicator) transcriptionIndicator.style.display = "none";
           this._dom.recordingTimer.textContent = " (00:00)";
         } else if (state === "stopped") {
           recordingIndicator.style.display = "none";
           startRecordBtn.style.display = "inline-block";
           stopRecordBtn.style.display = "none";
           playbackControls.style.display = "none";
+          if (transcriptionIndicator) transcriptionIndicator.style.display = "none";
         } else if (state === "playback") {
           recordingIndicator.style.display = "none";
           startRecordBtn.style.display = "none";
           stopRecordBtn.style.display = "none";
           playbackControls.style.display = "block";
+          if (transcriptionIndicator) transcriptionIndicator.style.display = "none";
         } else {
           recordingIndicator.style.display = "none";
           startRecordBtn.style.display = "inline-block";
