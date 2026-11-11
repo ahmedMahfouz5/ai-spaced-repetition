@@ -1,2 +1,5 @@
+# Ignore data.json anywhere in the repository
 data.json
+
+# Ignore node_modules directories anywhere
 node_modules/
