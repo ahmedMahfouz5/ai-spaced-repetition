@@ -1,4 +1,6 @@
 const obsidian = require("obsidian");
+const { AWSSTTService } = require("./AWSSTTService");
+const { AWSTranscriptionError } = require("./AWSError");
 
 /**
  * Maximum recording size allowed by the transcription endpoint (25 MB).
@@ -40,11 +42,20 @@ class TranscriptionService {
      *
      * @param {Blob} audioBlob - The recorded audio data.
      * @param {string} mimeType - The MIME type of the recorded audio.
+     * @param {Object} options - Optional parameters.
+     * @param {AbortSignal} options.signal - AbortSignal for cancelling AWS polling.
      * @returns {Promise<string>} The transcribed text.
      */
-    async transcribe(audioBlob, mimeType) {
+    async transcribe(audioBlob, mimeType, { signal } = {}) {
         if (!audioBlob || !(audioBlob instanceof Blob) || audioBlob.size === 0) {
             throw new TranscriptionError("No audio recording available.", "missing_audio");
+        }
+
+        if (this.settings.awsSTTEnabled) {
+            const awsService = new AWSSTTService(this.settings);
+            if (awsService.isEnabled()) {
+                return await awsService.transcribe(audioBlob, mimeType, { signal });
+            }
         }
 
         if (audioBlob.size > MAX_TRANSCRIPTION_SIZE_BYTES) {

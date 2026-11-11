@@ -8,7 +8,13 @@ const DEFAULT_SETTINGS = {
     model: "kimi-k3",
     transcriptionBaseURL: "",
     transcriptionApiKey: "",
-    transcriptionModel: "whisper-1"
+    transcriptionModel: "whisper-1",
+    awsSTTEnabled: false,
+    awsRegion: "us-east-2",
+    awsS3Bucket: "",
+    awsAccessKeyId: "",
+    awsSecretAccessKey: "",
+    awsLanguageCode: "en-US"
 };
 
 const VALID_VERDICTS = ["correct", "partially_correct", "incorrect"];

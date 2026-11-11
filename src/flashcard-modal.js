@@ -18,6 +18,9 @@ class FlashcardReviewModal extends obsidian.Modal {
         this.transcriptionService = new TranscriptionService(settings);
         this.evaluationRenderer = null;
 
+        // AbortController for cancelling AWS transcription work when the modal closes.
+        this.transcriptionAbortController = null;
+
         // Hardcoded test flashcard
         this.question = "What is the difference between Kubernetes Deployment and StatefulSet?";
         this.expectedAnswer = "A Deployment manages stateless applications using ReplicaSets, while a StatefulSet manages stateful applications and provides stable network identities and persistent storage associations.";
@@ -52,6 +55,10 @@ class FlashcardReviewModal extends obsidian.Modal {
     }
 
     onClose() {
+        if (this.transcriptionAbortController) {
+            this.transcriptionAbortController.abort();
+            this.transcriptionAbortController = null;
+        }
         this.audioRecorder.cleanup();
         const { contentEl } = this;
         contentEl.empty();
@@ -368,7 +375,11 @@ class FlashcardReviewModal extends obsidian.Modal {
 
         try {
             const mimeType = recorder.audioBlob.type || "audio/webm";
-            const transcript = await this.transcriptionService.transcribe(recorder.audioBlob, mimeType);
+
+            // Create a new AbortController for this transcription session.
+            this.transcriptionAbortController = new AbortController();
+            const signal = this.transcriptionAbortController.signal;
+            const transcript = await this.transcriptionService.transcribe(recorder.audioBlob, mimeType, { signal });
 
             this.transcribedText = transcript;
             this._dom.transcriptionTextarea.value = transcript;
@@ -381,6 +392,7 @@ class FlashcardReviewModal extends obsidian.Modal {
             this.setTranscriptionState("hidden");
         } finally {
             this.isTranscribing = false;
+            this.transcriptionAbortController = null;
         }
     }
 
